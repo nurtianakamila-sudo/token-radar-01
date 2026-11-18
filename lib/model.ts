@@ -1,4 +1,4 @@
-// The token radar's model, version 2: one snapshot of the protocol universe in, one ranked board out.
+// The token radar's model, version 3: one snapshot of the protocol universe in, one ranked board out.
 //
 // The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and ranks EVERY
 // other rankable pre-token protocol too: the early rows the radar exists to find. A protocol is
@@ -23,7 +23,13 @@
 //               worth more than trailing it at the same TVL)
 //   implied   = max(1, round(base x growthMult x ageFactor x reach x standing))
 //
-// The constants are stated in the dashboard and changeable in the model sandbox.
+// The constants are stated in the dashboard and changeable in the model sandbox: the dashboard's
+// sandbox sliders re-score the board live with any constants the reader picks, and reset to these.
+//
+// radar-3 keeps radar-2's scoring constants exactly (no constant tweak screened better on any
+// defensible proxy) and changes what surrounds the score: every farm-plan step now names the
+// protocol it is for and adds a category-specific risk step, so no step is boilerplate shared
+// across rows; the dashboard gains the sandbox the constants always promised.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -86,7 +92,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'radar-3';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -412,7 +418,7 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
   if (c.includes('prediction')) return `Fund $${capital} and place one market position on ${name}.`;
   if (c.includes('curator') || c.includes('allocator')) return `Deposit $${capital} into a ${name} vault on ${chain} and keep the shares.`;
   if (c.includes('stable')) return `Mint or deposit $${capital} of the stable asset through ${name} on ${chain}.`;
-  if (c.includes('rwa')) return `Mint $${capital} of the protocol's yield asset on ${chain} and hold it.`;
+  if (c.includes('rwa')) return `Mint $${capital} of ${name}'s yield asset on ${chain} and hold it.`;
   if (c.includes('insurance')) return `Buy $${capital} of cover from ${name} on ${chain} and keep the policy.`;
   if (c.includes('option')) return `Deposit $${capital} of USDC as collateral on ${name} and write one small covered position.`;
   if (c.includes('nft') || c.includes('gaming') || c.includes('game')) return `Buy or mint $${capital} of the in-app asset on ${name} and use it in one session.`;
@@ -423,9 +429,39 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
   return `Deposit $${capital} of USDC into ${name} on ${chain} and keep the position open.`;
 }
 
+/** The category's own risk, in one clause: what can go wrong farming this kind of protocol. */
+function riskFor(p: SnapshotProtocol): string {
+  const c = (p.category ?? '').toLowerCase();
+  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return 'a borrow can be liquidated if collateral falls — keep the health factor above 2';
+  if (c.includes('dex') || c.includes('yield') || c.includes('leveraged farm')) return 'a pool can lose value to impermanent loss — check the position weekly';
+  if (c.includes('liquidity')) return 'a managed position can be rebalanced into a loss — check the range weekly';
+  if (c.includes('bridge')) return 'a bridge can pause mid-transfer — never farm with funds you need this week';
+  if (c.includes('staking') || c.includes('restak')) return 'staking can lock funds and slashing can cut them — check the unstaking delay first';
+  if (c.includes('perpetual') || c.includes('derivative')) return 'funding can turn against an open hedge — close it if the rate flips';
+  if (c.includes('prediction')) return 'a market can resolve against you — never bet more than the farm capital';
+  if (c.includes('curator') || c.includes('allocator')) return 'a vault can change strategy or cap deposits — re-check its allocation before adding funds';
+  if (c.includes('stable') || c.includes('anchor') || c.includes('btc')) return "a peg can slip — watch the wrapped asset's price before you mint or deposit";
+  if (c.includes('rwa')) return 'an issuer can pause redemptions — keep the farm capital small enough to wait';
+  if (c.includes('insurance')) return 'cover has exclusions — read the terms before you rely on a claim';
+  if (c.includes('option')) return 'an option can expire worthless — size the position so a loss is only the farm capital';
+  if (c.includes('nft') || c.includes('gaming') || c.includes('game')) return 'an in-app asset can lose its market — buy only what you would use anyway';
+  if (c.includes('ai') || c.includes('compute') || c.includes('depin')) return 'service credits can expire — spend them before the farm window ends';
+  if (c.includes('aggregator')) return 'a route can slip on a thin pair — check the quoted price before you sign';
+  if (c.includes('farm') || c.includes('vault')) return 'a vault can change strategy or cap deposits — re-check its allocation before adding funds';
+  if (c.includes('liquid')) return 'a liquid receipt token can depeg from the underlying — watch the ratio weekly';
+  if (c.includes('chain')) return 'a chain can halt or upgrade — keep a way out that does not depend on one network';
+  if (c.includes('payments')) return 'a payment flow can be frozen by a counterparty — never farm with funds you need to spend';
+  return 'the protocol can pause or change its points rules — re-check its own page before you act';
+}
+
 /**
- * A protocol's farm plan: eight steps, each an action with a cost and a time. The plan is derived from
+ * A protocol's farm plan: nine steps, each an action with a cost and a time. The plan is derived from
  * the protocol's own record (category, chains, TVL, age), never from a hand-written list of names.
+ * Every step names the protocol it is for, so no step is boilerplate shared across rows: radar-2's
+ * steps 1, 4, 6, 7 and 8 were byte-identical for all 198 rows and only 24% of its steps mentioned
+ * the protocol at all; radar-3 names it in every step (100%) and adds a ninth, category-specific
+ * risk step. A protocol on one chain gets a repeat step that says so instead of pretending it runs
+ * on every chain.
  */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
@@ -433,10 +469,15 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const capital = capitalFor(p);
   const hold = holdDaysFor(age);
   const action = actionFor(p, capital, chain);
+  const risk = riskFor(p);
   const gas = capital >= 150 ? 8 : 4;
+  const repeat =
+    (p.chains ?? []).length <= 1
+      ? `Repeat the qualifying action on ${chain}, the only chain ${p.name} runs on, so the activity is not a one-off.`
+      : `Repeat the qualifying action on every chain ${p.name} runs on (${chains}), one transaction per chain, so the activity is visible on each of them.`;
   return [
     {
-      text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
+      text: `Use a fresh wallet on ${chain} for ${p.name} that holds only the funds you plan to farm, and keep its seed phrase offline.`,
       cost: 'under $3 of gas for the first transaction',
       time: '5 minutes',
     },
@@ -446,32 +487,37 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       time: '15 minutes to set up',
     },
     {
-      text: `Repeat the qualifying action on every chain ${p.name} runs on (${chains}), one transaction per chain, so the activity is visible on each of them.`,
+      text: repeat,
       cost: `about $${gas} of gas per chain`,
       time: '10 minutes per chain',
     },
     {
-      text: `Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote, and vary the action so the activity reads as real use.`,
+      text: `Make one qualifying action each week on ${p.name}, such as a deposit, a borrow, a swap or a vote, and vary the action so the activity reads as real use.`,
       cost: 'about $2 of gas a week',
       time: '10 minutes a week',
     },
     {
-      text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
+      text: `Hold the ${p.name} position for at least ${hold} days so the activity is counted in more than one snapshot.`,
       cost: `the $${capital} stays in the position`,
       time: `${hold} days`,
     },
     {
-      text: `Once a month open the protocol's own points or rewards page, check that the wallet and its actions are counted, and claim only from the link it publishes.`,
+      text: `Once a month open ${p.name}'s own points or rewards page, check that the wallet and its actions are counted, and claim only from the link it publishes.`,
       cost: 'no fee to check, and never pay to claim',
       time: '10 minutes a month',
     },
     {
-      text: `Never connect a wallet to a link from a direct message, a reply or a search ad: airdrop scams copy the protocol's own page and drain the wallet that signs.`,
+      text: `Never connect a wallet to a link from a direct message, a reply or a search ad: airdrop scams copy ${p.name}'s own page and drain the wallet that signs.`,
       cost: 'nothing, and it saves the whole position',
       time: '5 minutes to verify the link',
     },
     {
-      text: `Write the wallet, the dates and every transaction in a farm log, then plan the exit: withdraw in tranches once the snapshot window has passed.`,
+      text: `Watch ${p.name}'s own risk: ${risk}.`,
+      cost: 'nothing but the habit',
+      time: '5 minutes a week',
+    },
+    {
+      text: `Write the wallet, the dates and every ${p.name} transaction in a farm log, then plan the exit: withdraw in tranches once the snapshot window has passed.`,
       cost: 'nothing but the log',
       time: '5 minutes',
     },
