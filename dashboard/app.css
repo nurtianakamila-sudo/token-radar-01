@@ -1,4 +1,4 @@
-/* Token Radar theme, radar-2. Warm paper, deep green, a touch of gold — a radar that reads
+/* Token Radar theme, radar-3. Warm paper, deep green, a touch of gold — a radar that reads
    like a broadsheet, not a spreadsheet. The palette, the two radii, the two type families
    and the spacing scale are the whole style; every rule below just spends them. */
 :root {
@@ -208,6 +208,14 @@ tbody tr[data-selected="true"] { background: var(--accent-soft); box-shadow: ins
 
 .model { margin-top: var(--step-4); padding: var(--step-5); display: grid; gap: var(--step-3); }
 .formula { font-family: var(--font-num); font-size: 13px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; background: var(--canvas); border: 1px solid var(--border); border-radius: var(--radius-control); padding: var(--step-3); }
+
+/* Model sandbox: four slider rows and a reset, inside the methodology panel. */
+.sandbox { display: grid; gap: var(--step-3); border-top: 1px solid var(--border); padding-top: var(--step-4); }
+.sandbox-row { display: grid; grid-template-columns: 160px 1fr 64px; align-items: center; gap: var(--step-3); }
+.sandbox-row label { font-size: 13px; color: var(--muted); }
+.sandbox-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+.sandbox-row output { text-align: right; font-size: 13px; }
+.sandbox .button { justify-self: start; }
 .empty { padding: var(--step-7) var(--step-5); text-align: center; display: grid; gap: var(--step-3); justify-items: center; }
 .empty p { color: var(--muted); }
 .button { min-height: 36px; padding: 0 var(--step-4); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
